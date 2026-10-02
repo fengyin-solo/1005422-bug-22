@@ -82,10 +82,22 @@ import {
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('relocate')
-const columns = ["搬迁编号", "所属隐患点", "涉及户数", "安置方式", "安置地点", "签订日期", "完成日期", "搬迁状态"]
+const columns = ["搬迁编号", "所属隐患点", "涉及户数", "安置方式", "安置地点", "签订日期", "完成日期", "待转移预警", "搬迁状态"]
 const actions = ["确认签订", "开始搬迁", "确认完成"]
 const statuses = ["待签订", "已签订", "搬迁中", "已完成"]
-const stats = [{"label": "待签订户数", "value": 0}, {"label": "搬迁中户数", "value": 0}, {"label": "已安置户数", "value": 0}]
+const stats = computed(() => {
+  // 与清单同源统计：预警回写产生的待转移任务直接数清单，不再写死为 0。
+  const pendingTransfer = rows.value.filter((row) => String(row.待转移预警 ?? '') !== '').length
+  const signing = rows.value.filter((row) => String(row.status) === '待签订').length
+  const moving = rows.value.filter((row) => String(row.status) === '搬迁中').length
+  const done = rows.value.filter((row) => String(row.status) === '已完成').length
+  return [
+    {"label": "待转移预警", "value": pendingTransfer},
+    {"label": "待签订户数", "value": signing},
+    {"label": "搬迁中户数", "value": moving},
+    {"label": "已安置户数", "value": done},
+  ]
+})
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
