@@ -11,6 +11,11 @@
       </div>
     </header>
 
+    <div class="policy-banner">
+      <strong>口径说明：</strong>本站网页维护的「阈值雨量」是雨量站设备告警参数，<strong>不作为预警定级依据</strong>。
+      预警级别一律以「预警发布」页现行雨量阈值（蓝 / 黄 / 橙 / 红）实时重判为准；两处阈值冲突时，预警发布口径优先。
+    </div>
+
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>

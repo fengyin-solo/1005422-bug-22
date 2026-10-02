@@ -14,8 +14,11 @@
 ├── frontend/                 Vue 3 + Vite + TypeScript 前端（唯一运行单元）
 │   ├── src/views/            每个业务模块一个页面
 │   ├── src/api/local-service.ts   本地数据服务：列表、筛选、动作流转、导出
+│   ├── src/domain/warning.ts      预警发布领域规则：阈值、级别判定、流转、搬迁回写
 │   ├── src/data/             模块元数据 / 示例数据 / localStorage 持久化
+│   ├── src/components/       跨页面共用组件（如预警级别徽章）
 │   ├── src/stores/           会话与筛选状态
+│   ├── scripts/verify-*.ts   预警领域规则与端到端校验脚本（npm run verify）
 │   └── vite.config.ts        dev server 配置（open: false，无 /api 代理）
 ├── .gitignore
 └── docker-compose.yml
@@ -61,11 +64,33 @@ npm run build
 | 隐患核销 | `clearance` | 核销单 | 核销编号、所属隐患点、核销依据 |
 | 受威胁对象 | `threat` | 受威胁对象 | 对象编号、所属隐患点、对象类型 |
 
+## 预警发布口径（级别判定唯一标准）
+
+预警级别、流转与避险搬迁回写的规则全部收敛在 `frontend/src/domain/warning.ts`，页面、详情、工作台
+只能调用这里的判定结果，保证两处（多处）口径一致：
+
+- **现行雨量阈值（毫米，精确到 0.1mm）**：蓝 20 / 黄 50 / 橙 100 / 红 200。触发雨量达到哪一档，
+  就按哪一档发布；未达蓝色档不构成预警。雨量站网页的「阈值雨量」只是设备告警参数，**不参与定级**；
+  两处冲突时以预警发布页的现行阈值为准。
+- **存量重判**：每次读取数据、以及在页面调整阈值后，所有预警按现行阈值重判一遍并覆盖落库级别，
+  历史老级别不再生效。
+- **精度校准**：触发雨量不是 0.1mm 精度（如 `55.25`）的，先退回「待发布」并标「待校准」，
+  校准合格前不允许发布。
+- **发布渠道必填**：渠道没填的不允许保存、不允许发布；已经误标成「已发布」的存量记录会被挡回「待发布」。
+- **环节次序**：待发布 → 已发布 → 已解除 → 已误报，只能逐步往后走，跳跃一律挡回。
+- **重复提交**：同一预警编号重复登记不新增记录，沿用已有那条并按现行阈值更新。
+- **回写避险搬迁**：进入已发布/已解除/已误报的预警自动在避险搬迁清单生成「待转移预警」条目
+  （按预警编号去重）；预警退回待发布时，尚未转移的条目同步撤下，已完成的留痕。
+- **统计同源**：列表明细、本月误报数（按解除时间所在自然月）、工作台、搬迁页「待转移预警」
+  均由同一份预警记录统计。
+
 ## 约定
 
 - 每个模块的页面在 `frontend/src/views/<模块>/index.vue`，页面只负责渲染，读写统一走
-  `frontend/src/api/local-service.ts`。
+  `frontend/src/api/local-service.ts`；预警相关业务规则在 `frontend/src/domain/warning.ts`。
 - 字段、状态、动作与流转目标集中在 `frontend/src/data/modules.ts`；示例数据在
   `frontend/src/data/seed.ts`。
 - 状态流转只允许在 `local-service.ts` 里改，页面组件不做业务判断。
-- 想回到初始数据：清掉浏览器里 `geohazard-patrol:entries` 这一项，或调用 `resetModule(模块)`。
+- 想回到初始数据：清掉浏览器里 `geohazard-patrol:entries`（阈值另有
+  `geohazard-patrol:warning-thresholds`）两项，或调用 `resetModule(模块)`。
+- 校验预警规则：`cd frontend && npm run verify`（73 项断言）；类型检查：`npm run typecheck`。

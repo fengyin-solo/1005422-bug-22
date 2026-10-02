@@ -12,9 +12,22 @@
     </header>
 
     <div class="stat-row">
-      <article v-for="item in stats" :key="item.label" class="stat-card">
-        <span class="stat-label">{{ item.label }}</span>
-        <strong class="stat-value">{{ item.value }}</strong>
+      <article class="stat-card">
+        <span class="stat-label">待签订户数</span>
+        <strong class="stat-value">{{ stats.unsigned }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">搬迁中户数</span>
+        <strong class="stat-value">{{ stats.moving }}</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">已安置户数</span>
+        <strong class="stat-value">{{ stats.done }}</strong>
+      </article>
+      <!-- 清单里多出来的一项：预警发布结果回写的待转移预警，数量与预警页同源 -->
+      <article class="stat-card">
+        <span class="stat-label">待转移预警（预警发布回写）</span>
+        <strong class="stat-value">{{ stats.pendingTransfers }}</strong>
       </article>
     </div>
 
@@ -24,15 +37,7 @@
       </span>
     </p>
 
-    <form class="filter-bar" @submit.prevent="reload">
-      <label v-for="field in filterFields" :key="field" class="filter-item">
-        <span>{{ field }}</span>
-        <input v-model="filters[field]" :placeholder="`按${field}检索`" />
-      </label>
-      <button class="btn" type="submit">查询</button>
-      <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
-    </form>
-
+    <h3 class="section-title">搬迁安置单</h3>
     <table class="data-table">
       <thead>
         <tr>
@@ -42,12 +47,12 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows" :key="String(row.id)">
+        <tr v-for="row in regularRows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in actionsFor(row)"
               :key="action"
               class="link"
               type="button"
@@ -57,14 +62,62 @@
             </button>
           </td>
         </tr>
-        <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无避险搬迁数据，可先登记搬迁安置单</td>
+        <tr v-if="!regularRows.length">
+          <td :colspan="columns.length + 2" class="empty-state">暂无搬迁安置单</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- 待转移预警：预警发布/解除/误报环节回写，同一条预警沿用同一条清单 -->
+    <h3 class="section-title">
+      待转移预警清单
+      <span class="page-desc">（预警发布结果自动回写；按预警编号去重，重复提交不新增）</span>
+    </h3>
+    <table class="data-table transfer-table">
+      <thead>
+        <tr>
+          <th>清单编号</th>
+          <th>来源预警</th>
+          <th>发布对象</th>
+          <th>预警级别（与预警页一致）</th>
+          <th>触发雨量</th>
+          <th>发布渠道</th>
+          <th>转移状态</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in transferRows" :key="String(row.id)">
+          <td>{{ row['搬迁编号'] }}</td>
+          <td>
+            <RouterLink class="link" :to="warningLink(row)">{{ row['来源预警'] }}</RouterLink>
+          </td>
+          <td>{{ row['所属隐患点'] }}</td>
+          <td><LevelBadge :level="String(row['预警级别'] ?? '')" /></td>
+          <td class="mono">{{ row['触发雨量'] }} mm</td>
+          <td>{{ row['发布渠道'] || '—' }}</td>
+          <td>{{ transferStatusLabel(row) }}</td>
+          <td class="row-actions">
+            <button v-if="String(row.status) === '待签订'" class="link" type="button" @click="runAction('确认签订', row)">
+              确认转移
+            </button>
+            <button v-if="String(row.status) === '已签订'" class="link" type="button" @click="runAction('开始搬迁', row)">
+              开始搬迁
+            </button>
+            <button v-if="String(row.status) === '搬迁中'" class="link" type="button" @click="runAction('确认完成', row)">
+              确认完成
+            </button>
+            <span v-if="String(row.status) === '已完成'" class="page-desc">已完成转移</span>
+          </td>
+        </tr>
+        <tr v-if="!transferRows.length">
+          <td colspan="8" class="empty-state">暂无回写的待转移预警；预警发布后会自动出现在这里</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条避险搬迁记录</span>
+      <span>共 {{ total }} 条避险搬迁记录（含安置单 {{ regularRows.length }} 条、待转移预警 {{ transferRows.length }} 条）</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -80,28 +133,64 @@ import {
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import LevelBadge from '@/components/LevelBadge.vue'
 
 const meta = moduleMeta('relocate')
 const columns = ["搬迁编号", "所属隐患点", "涉及户数", "安置方式", "安置地点", "签订日期", "完成日期", "搬迁状态"]
-const actions = ["确认签订", "开始搬迁", "确认完成"]
-const statuses = ["待签订", "已签订", "搬迁中", "已完成"]
-const stats = [{"label": "待签订户数", "value": 0}, {"label": "搬迁中户数", "value": 0}, {"label": "已安置户数", "value": 0}]
+// 搬迁安置单环节次序：待签订 → 已签订 → 搬迁中 → 已完成，只能按序流转。
+const actionByStatus: Record<string, string> = {
+  待签订: '确认签订',
+  已签订: '开始搬迁',
+  搬迁中: '确认完成',
+  已完成: '',
+}
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+
+const transferRows = computed(() => rows.value.filter((row) => String(row['清单类别'] ?? '') === '待转移预警'))
+const regularRows = computed(() => rows.value.filter((row) => String(row['清单类别'] ?? '') !== '待转移预警'))
+
+function toHouseholds(list: EntryRow[]): number {
+  return list.reduce((sum, row) => sum + (Number(row['涉及户数']) || 0), 0)
+}
+
+const stats = computed(() => ({
+  unsigned: toHouseholds(regularRows.value.filter((row) => String(row.status) === '待签订')),
+  moving: toHouseholds(regularRows.value.filter((row) => String(row.status) === '搬迁中')),
+  done: toHouseholds(regularRows.value.filter((row) => String(row.status) === '已完成')),
+  // 待转移预警数直接取清单条目，与预警页 warningOverview() 是同一份回写数据
+  pendingTransfers: transferRows.value.filter((row) => String(row.status) === '待签订').length,
+}))
+
 const statusSummary = computed(() =>
-  statuses.map((status: string) => ({
+  ['待签订', '已签订', '搬迁中', '已完成'].map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
 
-function resetFilters() {
-  filters.value = {}
-  reload()
+function actionsFor(row: EntryRow): string[] {
+  const action = actionByStatus[String(row.status)]
+  return action ? [action] : []
+}
+
+function transferStatusLabel(row: EntryRow): string {
+  const map: Record<string, string> = {
+    待签订: '待转移',
+    已签订: '已确认转移',
+    搬迁中: '转移中',
+    已完成: '转移完成',
+  }
+  return map[String(row.status)] ?? String(row.status)
+}
+
+function warningLink(row: EntryRow): string {
+  // 预警详情按编号找 id；找不到就回预警列表。
+  const code = String(row['来源预警'] ?? '')
+  const found = listEntries('warning').items.find((item) => String(item['预警编号']) === code)
+  return found ? `/warning/${found.id}` : '/warning'
 }
 
 function exportRows() {
@@ -125,7 +214,7 @@ function runAction(action: string, row: EntryRow) {
 function reload() {
   errorMessage.value = ''
   try {
-    const payload = listEntries(meta.key, filters.value)
+    const payload = listEntries(meta.key, {})
     rows.value = payload.items
     total.value = payload.total
   } catch (error) {

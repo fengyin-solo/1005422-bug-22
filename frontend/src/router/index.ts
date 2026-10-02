@@ -6,6 +6,7 @@ const Slope = () => import('@/views/slope/index.vue')
 const Crack = () => import('@/views/crack/index.vue')
 const Rain = () => import('@/views/rain/index.vue')
 const Warning = () => import('@/views/warning/index.vue')
+const WarningDetail = () => import('@/views/warning/detail.vue')
 const Patrol = () => import('@/views/patrol/index.vue')
 const Relocate = () => import('@/views/relocate/index.vue')
 const Refuge = () => import('@/views/refuge/index.vue')
@@ -29,6 +30,7 @@ const router = createRouter({
     { path: '/crack', name: 'crack', component: Crack },
     { path: '/rain', name: 'rain', component: Rain },
     { path: '/warning', name: 'warning', component: Warning },
+    { path: '/warning/:id', name: 'warning-detail', component: WarningDetail },
     { path: '/patrol', name: 'patrol', component: Patrol },
     { path: '/relocate', name: 'relocate', component: Relocate },
     { path: '/refuge', name: 'refuge', component: Refuge },
